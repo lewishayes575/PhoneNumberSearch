@@ -3,6 +3,8 @@ import phonenumbers
 from phonenumbers import geocoder, carrier
 import os
 import json
+import subprocess
+import time
 
 CONFIG_FILE = "api_keys.json"
 
@@ -40,8 +42,41 @@ def validate_number(number):
     except:
         return False
 
+# Function to detect incoming calls using Termux API
+def detect_incoming_call():
+    try:
+        while True:
+            result = subprocess.run(["termux-telephony-callinfo"], capture_output=True, text=True)
+            if result.returncode == 0:
+                call_data = json.loads(result.stdout)
+                phone_number = call_data.get("phone_number", "")
+                if phone_number:
+                    print(f"Incoming call detected from: {phone_number}")
+                    return phone_number
+            time.sleep(2)  # Check for calls every 2 seconds
+    except Exception as e:
+        print(f"Error detecting incoming call: {e}")
+    return None
+
+# Function to get cell tower info from Termux API
+def get_cell_tower_info():
+    try:
+        result = subprocess.run(["termux-telephony-cellinfo"], capture_output=True, text=True)
+        if result.returncode == 0:
+            cell_data = json.loads(result.stdout)
+            mcc = str(cell_data[0].get("mcc", ""))
+            mnc = str(cell_data[0].get("mnc", ""))
+            lac = str(cell_data[0].get("lac", ""))
+            cid = str(cell_data[0].get("cid", ""))
+            return mcc, mnc, lac, cid
+        else:
+            print("Error fetching cell tower info. Make sure Termux API is installed and has the necessary permissions.")
+    except Exception as e:
+        print(f"Error retrieving cell tower info: {e}")
+    return None, None, None, None
+
 # Function to get phone number details
-def get_number_info(number, api_key):
+def get_number_info(number, numverify_api_key, opencellid_api_key):
     try:
         parsed_number = phonenumbers.parse(number)
         country = geocoder.description_for_number(parsed_number, "en")
@@ -52,7 +87,7 @@ def get_number_info(number, api_key):
         print(f"Carrier: {carrier_name}")
         
         # Using NumVerify API for additional details
-        url = f"http://apilayer.net/api/validate?access_key={api_key}&number={number}&format=1"
+        url = f"http://apilayer.net/api/validate?access_key={numverify_api_key}&number={number}&format=1"
         response = requests.get(url)
         data = response.json()
         
@@ -64,9 +99,23 @@ def get_number_info(number, api_key):
         else:
             print("\nAPI could not validate the number.")
         
-        # Inform user about cell tower tracking limitations
-        print("\nCell tower location tracking requires direct access to mobile network logs, which is not available via NumVerify API.")
-        print("For accurate cell tower location, use a mobile app that can access real-time network data.")
+        # Get cell tower data from Termux API
+        print("\nFetching cell tower location...")
+        mcc, mnc, lac, cid = get_cell_tower_info()
+        
+        if mcc and mnc and lac and cid:
+            cell_tower_url = f"https://opencellid.org/cell/get?key={opencellid_api_key}&mcc={mcc}&mnc={mnc}&lac={lac}&cid={cid}"
+            cell_response = requests.get(cell_tower_url)
+            cell_data = cell_response.json()
+            
+            if 'lat' in cell_data and 'lon' in cell_data:
+                print(f"\nEstimated Cell Tower Location:")
+                print(f"Latitude: {cell_data['lat']}")
+                print(f"Longitude: {cell_data['lon']}")
+            else:
+                print("\nCould not determine cell tower location. Check the MCC, MNC, LAC, and CID values.")
+        else:
+            print("\nUnable to retrieve cell tower data from Termux. Ensure you have granted necessary permissions.")
         
     except Exception as e:
         print(f"Error: {e}")
@@ -76,12 +125,15 @@ if __name__ == "__main__":
         print("API keys found. Skipping API key input.")
         api_keys = load_api_keys()
         numverify_api_key = api_keys.get("NumVerify", "")
+        opencellid_api_key = api_keys.get("OpenCelliD", "")
     else:
         numverify_api_key = get_api_key("NumVerify")
+        opencellid_api_key = get_api_key("OpenCelliD")
     
-    phone_number = input("Enter phone number with country code (e.g., +14155552671): ")
+    print("Waiting for an incoming call...")
+    phone_number = detect_incoming_call()
     
-    if validate_number(phone_number):
-        get_number_info(phone_number, numverify_api_key)
+    if phone_number:
+        get_number_info(phone_number, numverify_api_key, opencellid_api_key)
     else:
-        print("Invalid phone number. Please enter a correct number.")
+        print("No incoming call detected.")
