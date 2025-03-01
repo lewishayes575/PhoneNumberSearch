@@ -18,6 +18,10 @@ def load_api_keys():
             return json.load(file)
     return {}
 
+# Function to check if API keys exist
+def check_existing_api_keys():
+    return os.path.exists(CONFIG_FILE)
+
 # Function to get API Key from user
 def get_api_key(service_name):
     api_keys = load_api_keys()
@@ -37,7 +41,7 @@ def validate_number(number):
         return False
 
 # Function to get phone number details
-def get_number_info(number, api_key, open_cell_id_api_key):
+def get_number_info(number, api_key):
     try:
         parsed_number = phonenumbers.parse(number)
         country = geocoder.description_for_number(parsed_number, "en")
@@ -60,34 +64,24 @@ def get_number_info(number, api_key, open_cell_id_api_key):
         else:
             print("\nAPI could not validate the number.")
         
-        # Getting possible cell tower location using OpenCelliD API
-        if open_cell_id_api_key:
-            mcc = data.get('country_code')  # Mobile Country Code
-            mnc = data.get('carrier')  # Mobile Network Code
-            lac = data.get('location')  # Location Area Code
-            cid = data.get('line_type')  # Cell ID (simulated)
-            
-            if mcc and mnc and lac and cid:
-                cell_tower_url = f"https://opencellid.org/cell/get?key={open_cell_id_api_key}&mcc={mcc}&mnc={mnc}&lac={lac}&cid={cid}"
-                cell_response = requests.get(cell_tower_url)
-                cell_data = cell_response.json()
-                if 'lat' in cell_data and 'lon' in cell_data:
-                    print(f"\nEstimated Cell Tower Location:")
-                    print(f"Latitude: {cell_data['lat']}")
-                    print(f"Longitude: {cell_data['lon']}")
-                else:
-                    print("\nCould not determine cell tower location.")
-            else:
-                print("\nNot enough data to determine possible cell tower.")
+        # Inform user about cell tower tracking limitations
+        print("\nCell tower location tracking requires direct access to mobile network logs, which is not available via NumVerify API.")
+        print("For accurate cell tower location, use a mobile app that can access real-time network data.")
+        
     except Exception as e:
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    numverify_api_key = get_api_key("NumVerify")
-    open_cell_id_api_key = get_api_key("OpenCelliD")
+    if check_existing_api_keys():
+        print("API keys found. Skipping API key input.")
+        api_keys = load_api_keys()
+        numverify_api_key = api_keys.get("NumVerify", "")
+    else:
+        numverify_api_key = get_api_key("NumVerify")
+    
     phone_number = input("Enter phone number with country code (e.g., +14155552671): ")
     
     if validate_number(phone_number):
-        get_number_info(phone_number, numverify_api_key, open_cell_id_api_key)
+        get_number_info(phone_number, numverify_api_key)
     else:
         print("Invalid phone number. Please enter a correct number.")
